@@ -1,0 +1,12 @@
+# cloudbuild.yaml
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '${_IMAGE}', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_IMAGE}']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    args: ['gcloud', 'run', 'deploy', 'tshirt-api',
+           '--image', '${_IMAGE}', '--region', 'us-west1',
+           '--allow-unauthenticated', '--platform', 'managed']
+substitutions:
+  _IMAGE: 'us-west1-docker.pkg.dev/$PROJECT_ID/tsite/tshirt:latest'
