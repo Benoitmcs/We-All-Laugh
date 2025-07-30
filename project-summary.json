@@ -1,0 +1,61 @@
+{
+  "projectName": "tshirt-platform",
+  "description": "A modern e-commerce platform for selling t-shirts, featuring a 3D t-shirt viewer.",
+  "architecture": {
+    "style": "Client-Server",
+    "client": {
+      "path": "client/",
+      "description": "The front-end of the application, what users see and interact with in their web browser. It is responsible for the user interface (UI), including the 3D t-shirt viewer.",
+      "language": "TypeScript",
+      "framework": "Next.js",
+      "libraries": [
+        {
+          "name": "React",
+          "description": "A JavaScript library for building user interfaces."
+        },
+        {
+          "name": "Three.js",
+          "description": "A 3D graphics library."
+        },
+        {
+          "name": "@react-three/fiber",
+          "description": "A React renderer for Three.js."
+        },
+        {
+          "name": "@react-three/drei",
+          "description": "A collection of useful helpers and abstractions for @react-three/fiber."
+        },
+        {
+          "name": "Tailwind CSS",
+          "description": "A utility-first CSS framework for rapid UI development."
+        }
+      ]
+    },
+    "server": {
+      "path": "server/",
+      "description": "The back-end of the application. It runs on a remote computer (a server) and handles the business logic, like processing payments with Stripe and managing data.",
+      "language": "JavaScript",
+      "runtime": "Node.js",
+      "framework": "Express.js",
+      "libraries": [
+        {
+          "name": "Stripe",
+          "description": "The official Stripe library for Node.js, used to securely process payments."
+        }
+      ]
+    }
+  },
+  "devops": {
+    "docker": {
+      "dockerfile": "Dockerfile",
+      "dockerCompose": "docker-compose.yml",
+      "description": "The application is containerized using Docker for consistent development and deployment environments."
+    },
+    "ci_cd": {
+      "provider": "Google Cloud Build",
+      "configFile": "cloudbuild.yaml",
+      "deploymentTarget": "Google Cloud Run",
+      "description": "A CI/CD pipeline is defined to automatically build, push, and deploy the application to Google Cloud Run on every push to the main branch."
+    }
+  }
+}
