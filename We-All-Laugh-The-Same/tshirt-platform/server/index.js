@@ -29,6 +29,7 @@ async function startServer() {
     const isProduction = process.env.NODE_ENV === 'production';
 
     const checkoutRouter = (await import('./routes/checkout.js')).default;
+    const paymentIntentRouter = (await import('./routes/payment-intent.js')).default;
 
     // Security middleware
     app.use(helmet({
@@ -109,6 +110,7 @@ async function startServer() {
     app.use(express.static(join(__dirname, 'public')));
 
     app.use('/api/checkout', checkoutLimiter, checkoutRouter);
+    app.use('/api/payment-intent', checkoutLimiter, paymentIntentRouter);
 
     // Handles any requests that don't match the ones above
     app.get('*', (req,res) =>{

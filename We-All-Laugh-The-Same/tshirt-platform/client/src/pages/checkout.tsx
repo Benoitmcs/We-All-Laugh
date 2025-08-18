@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { NextSeo } from 'next-seo';
 import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, ShoppingCart, Palette, Shirt, Plus, Minus, Trash2 } from 'lucide-react';
+import { Check, ShoppingCart, Palette, Shirt, Plus, Minus, Trash2, CreditCard, Truck, User } from 'lucide-react';
 
 const TShirtViewer = dynamic(() => import('../components/TShirtViewer'), {
   loading: () => (
@@ -36,10 +37,6 @@ const availableColors = [
   { name: 'Black', hex: '#2C2C2C' },
   { name: 'Gray', hex: '#808080' },
   { name: 'Purple', hex: '#6F5BA7' },
-  { name: 'Green', hex: '#5E7F61' },
-  { name: 'Blue', hex: '#4A6A8A' },
-  { name: 'Yellow', hex: '#D4B948' },
-  { name: 'Red', hex: '#A34545' },
 ];
 
 const stripePromise = loadStripe(
@@ -56,37 +53,189 @@ interface CartItem {
   quantity: number;
 }
 
-const CheckoutButton = ({ onCheckout, isLoading = false }) => {
+interface ShippingAddress {
+  name: string;
+  email: string;
+  line1: string;
+  line2?: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  country: string;
+}
+
+const PaymentForm = ({ cart, shippingAddress, onPaymentSuccess, onPaymentError }) => {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+
+  const handlePayment = async (event) => {
+    event.preventDefault();
+    
+    if (!stripe || !elements) return;
+    
+    const cardElement = elements.getElement(CardElement);
+    if (!cardElement) return;
+
+    setIsProcessing(true);
+    setPaymentError('');
+
+    try {
+      // Create Payment Intent
+      const cartItems = cart.map(item => ({
+        design: item.design,
+        size: item.size,
+        color: item.color.name,
+        quantity: item.quantity,
+        price: item.price
+      }));
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/payment-intent/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          cartItems,
+          shippingAddress
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create payment intent');
+      }
+
+      const { clientSecret } = await response.json();
+
+      // Confirm payment with card
+      const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: cardElement,
+          billing_details: {
+            name: shippingAddress.name,
+          },
+        },
+      });
+
+      if (error) {
+        setPaymentError(error.message);
+        onPaymentError(error.message);
+      } else if (paymentIntent.status === 'succeeded') {
+        onPaymentSuccess(paymentIntent);
+      }
+    } catch (error) {
+      const message = error.message || 'Payment failed. Please try again.';
+      setPaymentError(message);
+      onPaymentError(message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
-    <motion.button
-      onClick={onCheckout}
-      disabled={isLoading}
-      className="w-full bg-dandelion text-brand-black font-bold py-4 px-6 rounded-xl mt-6 hover:bg-yellow-500 focus:outline-none focus:ring-4 focus:ring-yellow-300 focus:ring-offset-2 transition-all duration-300 disabled:opacity-50 shadow-lg"
-      whileHover={{ scale: 1.02, y: -2 }}
-      whileTap={{ scale: 0.98 }}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.4 }}
-    >
-      <span className="flex items-center justify-center">
-        {isLoading ? (
-          <motion.div 
-            className="spinner"
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+    <form onSubmit={handlePayment}>
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-3 flex items-center">
+          <CreditCard className="w-4 h-4 mr-2" />
+          Payment Details
+        </label>
+        <div className="p-4 border border-gray-300 rounded-lg bg-white">
+          <CardElement
+            options={{
+              style: {
+                base: {
+                  fontSize: '16px',
+                  color: '#424770',
+                  '::placeholder': {
+                    color: '#aab7c4',
+                  },
+                },
+              },
+            }}
           />
-        ) : (
-          <>
-            <ShoppingCart className="w-5 h-5 mr-2" />
-            Proceed to Checkout
-          </>
-        )}
-      </span>
-    </motion.button>
+        </div>
+      </div>
+      
+      {paymentError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          {paymentError}
+        </div>
+      )}
+      
+      <motion.button
+        type="submit"
+        disabled={!stripe || !elements || isProcessing}
+        className="w-full bg-dandelion text-brand-black font-bold py-4 px-6 rounded-xl hover:bg-yellow-500 focus:outline-none focus:ring-4 focus:ring-yellow-300 focus:ring-offset-2 transition-all duration-300 disabled:opacity-50 shadow-lg"
+        whileHover={{ scale: 1.02, y: -2 }}
+        whileTap={{ scale: 0.98 }}
+      >
+        <span className="flex items-center justify-center">
+          {isProcessing ? (
+            <motion.div 
+              className="spinner"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
+          ) : (
+            <>
+              <CreditCard className="w-5 h-5 mr-2" />
+              Complete Payment
+            </>
+          )}
+        </span>
+      </motion.button>
+    </form>
   );
 };
 
-function CheckoutPage() {
+const CheckoutSteps = ({ currentStep }) => {
+  const steps = [
+    { id: 1, name: 'Customize', icon: Shirt },
+    { id: 2, name: 'Shipping', icon: Truck },
+    { id: 3, name: 'Payment', icon: CreditCard }
+  ];
+
+  return (
+    <motion.div
+      className="flex justify-center mb-12"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, delay: 0.2 }}
+    >
+      <div className="flex items-center space-x-4">
+        {steps.map((step, index) => {
+          const Icon = step.icon;
+          const isActive = currentStep >= step.id;
+          
+          return (
+            <React.Fragment key={step.id}>
+              <div className="flex items-center">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  isActive ? 'bg-dandelion' : 'bg-gray-200'
+                }`}>
+                  <Icon className={`w-5 h-5 ${
+                    isActive ? 'text-brand-black' : 'text-gray-500'
+                  }`} />
+                </div>
+                <span className={`ml-2 text-sm font-medium ${
+                  isActive ? 'text-gray-700' : 'text-gray-500'
+                }`}>
+                  {step.name}
+                </span>
+              </div>
+              {index < steps.length - 1 && (
+                <div className={`w-8 h-0.5 ${
+                  currentStep > step.id ? 'bg-dandelion' : 'bg-gray-300'
+                }`}></div>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+};
+
+function CheckoutPageContent() {
   // Current customization state
   const [color, setColor] = useState(availableColors[0]);
   const [design, setDesign] = useState(designs[0]);
@@ -95,51 +244,54 @@ function CheckoutPage() {
   
   // Cart state
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
+  
+  // Checkout flow state
+  const [currentStep, setCurrentStep] = useState(1);
+  const [shippingAddress, setShippingAddress] = useState<ShippingAddress>({
+    name: '',
+    email: '',
+    line1: '',
+    line2: '',
+    city: '',
+    state: '',
+    postal_code: '',
+    country: 'US'
+  });
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [paymentDetails, setPaymentDetails] = useState(null);
 
   // Calculate totals
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const shipping = cart.length > 0 ? 5 : 0;
   const total = subtotal + shipping;
 
-  // Handle checkout with Stripe Checkout Sessions
-  const handleCheckout = async () => {
-    if (cart.length === 0) return;
-
-    setIsCheckoutLoading(true);
+  // Handle shipping form
+  const handleShippingSubmit = (e) => {
+    e.preventDefault();
     
-    try {
-      // For now, we'll use a simple checkout approach
-      // In production, you'd create proper SKUs in Stripe Dashboard
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          skuId: 'price_example', // Replace with real Stripe price ID
-          quantity: cart.reduce((sum, item) => sum + item.quantity, 0)
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create checkout session');
-      }
-
-      const { sessionId } = await response.json();
-      
-      const stripe = await stripePromise;
-      const { error } = await stripe.redirectToCheckout({ sessionId });
-
-      if (error) {
-        console.error('Stripe error:', error);
-        alert('Checkout failed. Please try again.');
-      }
-    } catch (error) {
-      console.error('Error creating checkout session:', error);
-      alert('Checkout failed. Please try again.');
-    } finally {
-      setIsCheckoutLoading(false);
+    // Validate required fields
+    const requiredFields = ['name', 'email', 'line1', 'city', 'state', 'postal_code'];
+    const missingFields = requiredFields.filter(field => !shippingAddress[field]?.trim());
+    
+    if (missingFields.length > 0) {
+      alert(`Please fill in: ${missingFields.join(', ')}`);
+      return;
     }
+    
+    setCurrentStep(3); // Move to payment step
+  };
+
+  // Handle payment success
+  const handlePaymentSuccess = (paymentIntent) => {
+    setPaymentSuccess(true);
+    setPaymentDetails(paymentIntent);
+  };
+
+  // Handle payment error
+  const handlePaymentError = (error) => {
+    console.error('Payment failed:', error);
+    // Error handling is done in PaymentForm component
   };
 
   const handleSizeChange = (selectedSize) => {
@@ -217,30 +369,10 @@ function CheckoutPage() {
           </motion.h1>
 
           {/* Progress Steps */}
-          <motion.div
-            className="flex justify-center mb-12"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-          >
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center">
-                <div className="w-10 h-10 bg-dandelion rounded-full flex items-center justify-center">
-                  <Shirt className="w-5 h-5 text-brand-black" />
-                </div>
-                <span className="ml-2 text-sm font-medium text-gray-700">Customize</span>
-              </div>
-              <div className="w-8 h-0.5 bg-gray-300"></div>
-              <div className="flex items-center">
-                <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
-                  <ShoppingCart className="w-5 h-5 text-gray-500" />
-                </div>
-                <span className="ml-2 text-sm font-medium text-gray-500">Checkout</span>
-              </div>
-            </div>
-          </motion.div>
+          <CheckoutSteps currentStep={currentStep} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 xl:gap-12">
+            {/* Left Column - Customization (Always visible) */}
             <motion.div
               className="bg-brand-white p-6 sm:p-8 rounded-2xl shadow-xl"
               initial={{ opacity: 0, x: -50 }}
@@ -405,6 +537,7 @@ function CheckoutPage() {
               </motion.div>
             </motion.div>
 
+            {/* Right Column - Cart/Shipping/Payment */}
             <motion.div
               id="checkout"
               className="bg-brand-white p-6 sm:p-8 rounded-2xl shadow-xl"
@@ -412,146 +545,335 @@ function CheckoutPage() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.6, delay: 0.4 }}
             >
-              <div className="flex items-center mb-6">
-                <ShoppingCart className="w-6 h-6 text-dandelion mr-3" />
-                <h2 className="text-2xl sm:text-3xl font-bold text-brand-black">
-                  Complete Your Order
-                </h2>
-              </div>
-              
-              {/* Cart Items */}
-              <motion.div
-                className="mb-6"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.6 }}
-              >
-                <h3 className="font-semibold text-brand-black mb-4 flex items-center">
-                  <ShoppingCart className="w-5 h-5 mr-2" />
-                  Your Cart ({cart.length} {cart.length === 1 ? 'item' : 'items'})
-                </h3>
-                
-                {cart.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                    <p>Your cart is empty</p>
-                    <p className="text-sm">Add some items to get started!</p>
+              {/* Step 1: Cart */}
+              {currentStep === 1 && (
+                <>
+                  <div className="flex items-center mb-6">
+                    <ShoppingCart className="w-6 h-6 text-dandelion mr-3" />
+                    <h2 className="text-2xl sm:text-3xl font-bold text-brand-black">
+                      Your Cart
+                    </h2>
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    <AnimatePresence>
-                      {cart.map((item) => (
-                        <motion.div
-                          key={item.id}
-                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border"
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, x: 20 }}
-                          transition={{ duration: 0.3 }}
-                        >
-                          <div className="flex-1">
-                            <div className="flex items-center mb-1">
-                              <div
-                                className="w-4 h-4 rounded-full border mr-2"
-                                style={{ backgroundColor: item.color.hex }}
-                              />
-                              <h4 className="font-medium text-sm text-brand-black">
-                                {item.design} T-Shirt
-                              </h4>
+                  
+                  {cart.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                      <p>Your cart is empty</p>
+                      <p className="text-sm">Add some items to get started!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 mb-6">
+                      <AnimatePresence>
+                        {cart.map((item) => (
+                          <motion.div
+                            key={item.id}
+                            className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border"
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            transition={{ duration: 0.3 }}
+                          >
+                            <div className="flex-1">
+                              <div className="flex items-center mb-1">
+                                <div
+                                  className="w-4 h-4 rounded-full border mr-2"
+                                  style={{ backgroundColor: item.color.hex }}
+                                />
+                                <h4 className="font-medium text-sm text-brand-black">
+                                  {item.design} T-Shirt
+                                </h4>
+                              </div>
+                              <p className="text-xs text-gray-600">
+                                Size: {item.size} | Color: {item.color.name}
+                              </p>
+                              <p className="text-sm font-semibold text-brand-black">
+                                ${item.price} each
+                              </p>
                             </div>
-                            <p className="text-xs text-gray-600">
-                              Size: {item.size} | Color: {item.color.name}
-                            </p>
-                            <p className="text-sm font-semibold text-brand-black">
-                              ${item.price} each
-                            </p>
-                          </div>
-                          
-                          <div className="flex items-center space-x-2">
-                            <motion.button
-                              onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                              className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 transition-colors"
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                            >
-                              <Minus className="w-4 h-4" />
-                            </motion.button>
                             
-                            <span className="w-8 text-center font-medium">
-                              {item.quantity}
-                            </span>
-                            
-                            <motion.button
-                              onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                              className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 transition-colors"
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                            >
-                              <Plus className="w-4 h-4" />
-                            </motion.button>
-                            
-                            <motion.button
-                              onClick={() => removeFromCart(item.id)}
-                              className="w-8 h-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center hover:bg-red-200 transition-colors ml-2"
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </motion.button>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                    
-                    {/* Cart Totals */}
-                    <motion.div
-                      className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200"
-                      layout
-                    >
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-gray-700">Subtotal:</span>
-                        <span className="font-bold text-brand-black">${subtotal}</span>
-                      </div>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-gray-700">Shipping:</span>
-                        <span className="font-bold text-brand-black">${shipping}</span>
-                      </div>
-                      <hr className="my-2 border-yellow-300" />
-                      <div className="flex justify-between items-center text-lg">
-                        <span className="font-bold text-brand-black">Total:</span>
-                        <motion.span
-                          key={total}
-                          className="font-bold text-dandelion text-xl"
-                          initial={{ scale: 1.3 }}
-                          animate={{ scale: 1 }}
-                          transition={{ duration: 0.3 }}
-                        >
-                          ${total}
-                        </motion.span>
-                      </div>
-                    </motion.div>
-                  </div>
-                )}
-              </motion.div>
+                            <div className="flex items-center space-x-2">
+                              <motion.button
+                                onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                                className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 transition-colors"
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
+                              >
+                                <Minus className="w-4 h-4" />
+                              </motion.button>
+                              
+                              <span className="w-8 text-center font-medium">
+                                {item.quantity}
+                              </span>
+                              
+                              <motion.button
+                                onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                                className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center hover:bg-gray-300 transition-colors"
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
+                              >
+                                <Plus className="w-4 h-4" />
+                              </motion.button>
+                              
+                              <motion.button
+                                onClick={() => removeFromCart(item.id)}
+                                className="w-8 h-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center hover:bg-red-200 transition-colors ml-2"
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </motion.button>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                      
+                      {/* Cart Totals */}
+                      <motion.div
+                        className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200"
+                        layout
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-gray-700">Subtotal:</span>
+                          <span className="font-bold text-brand-black">${subtotal}</span>
+                        </div>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-gray-700">Shipping:</span>
+                          <span className="font-bold text-brand-black">${shipping}</span>
+                        </div>
+                        <hr className="my-2 border-yellow-300" />
+                        <div className="flex justify-between items-center text-lg">
+                          <span className="font-bold text-brand-black">Total:</span>
+                          <motion.span
+                            key={total}
+                            className="font-bold text-dandelion text-xl"
+                            initial={{ scale: 1.3 }}
+                            animate={{ scale: 1 }}
+                            transition={{ duration: 0.3 }}
+                          >
+                            ${total}
+                          </motion.span>
+                        </div>
+                      </motion.div>
+                    </div>
+                  )}
 
-              {cart.length > 0 && (
+                  {cart.length > 0 && (
+                    <motion.button
+                      onClick={() => setCurrentStep(2)}
+                      className="w-full bg-dandelion text-brand-black font-bold py-4 px-6 rounded-xl hover:bg-yellow-500 focus:outline-none focus:ring-4 focus:ring-yellow-300 focus:ring-offset-2 transition-all duration-300 shadow-lg"
+                      whileHover={{ scale: 1.02, y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <span className="flex items-center justify-center">
+                        <Truck className="w-5 h-5 mr-2" />
+                        Continue to Shipping
+                      </span>
+                    </motion.button>
+                  )}
+                </>
+              )}
+
+              {/* Step 2: Shipping */}
+              {currentStep === 2 && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.7 }}
+                  transition={{ duration: 0.3 }}
                 >
-                  <CheckoutButton onCheckout={handleCheckout} isLoading={isCheckoutLoading} />
+                  <div className="flex items-center mb-6">
+                    <Truck className="w-6 h-6 text-dandelion mr-3" />
+                    <h2 className="text-2xl font-bold text-brand-black">
+                      Shipping Address
+                    </h2>
+                  </div>
+                  
+                  <form onSubmit={handleShippingSubmit} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Full Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={shippingAddress.name}
+                        onChange={(e) => setShippingAddress({...shippingAddress, name: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-dandelion focus:border-transparent"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        value={shippingAddress.email}
+                        onChange={(e) => setShippingAddress({...shippingAddress, email: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-dandelion focus:border-transparent"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Address Line 1 *
+                      </label>
+                      <input
+                        type="text"
+                        value={shippingAddress.line1}
+                        onChange={(e) => setShippingAddress({...shippingAddress, line1: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-dandelion focus:border-transparent"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Address Line 2
+                      </label>
+                      <input
+                        type="text"
+                        value={shippingAddress.line2}
+                        onChange={(e) => setShippingAddress({...shippingAddress, line2: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-dandelion focus:border-transparent"
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          City *
+                        </label>
+                        <input
+                          type="text"
+                          value={shippingAddress.city}
+                          onChange={(e) => setShippingAddress({...shippingAddress, city: e.target.value})}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-dandelion focus:border-transparent"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          State *
+                        </label>
+                        <input
+                          type="text"
+                          value={shippingAddress.state}
+                          onChange={(e) => setShippingAddress({...shippingAddress, state: e.target.value})}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-dandelion focus:border-transparent"
+                          required
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          ZIP Code *
+                        </label>
+                        <input
+                          type="text"
+                          value={shippingAddress.postal_code}
+                          onChange={(e) => setShippingAddress({...shippingAddress, postal_code: e.target.value})}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-dandelion focus:border-transparent"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Country *
+                        </label>
+                        <select
+                          value={shippingAddress.country}
+                          onChange={(e) => setShippingAddress({...shippingAddress, country: e.target.value})}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-dandelion focus:border-transparent"
+                          required
+                        >
+                          <option value="US">United States</option>
+                          <option value="CA">Canada</option>
+                        </select>
+                      </div>
+                    </div>
+                    
+                    <div className="flex space-x-4 pt-4">
+                      <motion.button
+                        type="button"
+                        onClick={() => setCurrentStep(1)}
+                        className="flex-1 bg-gray-200 text-gray-700 font-bold py-3 px-6 rounded-xl hover:bg-gray-300 transition-all duration-300"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        Back to Cart
+                      </motion.button>
+                      
+                      <motion.button
+                        type="submit"
+                        className="flex-1 bg-dandelion text-brand-black font-bold py-3 px-6 rounded-xl hover:bg-yellow-500 transition-all duration-300"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        Continue to Payment
+                      </motion.button>
+                    </div>
+                  </form>
                 </motion.div>
               )}
 
-              {cart.length === 0 && (
+              {/* Step 3: Payment */}
+              {currentStep === 3 && !paymentSuccess && (
                 <motion.div
-                  className="text-center py-4"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.7 }}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
                 >
-                  <p className="text-gray-500">Add items to your cart to proceed with checkout</p>
+                  <div className="flex items-center mb-6">
+                    <CreditCard className="w-6 h-6 text-dandelion mr-3" />
+                    <h2 className="text-2xl font-bold text-brand-black">
+                      Payment
+                    </h2>
+                  </div>
+                  
+                  <PaymentForm
+                    cart={cart}
+                    shippingAddress={shippingAddress}
+                    onPaymentSuccess={handlePaymentSuccess}
+                    onPaymentError={handlePaymentError}
+                  />
+                  
+                  <motion.button
+                    onClick={() => setCurrentStep(2)}
+                    className="w-full mt-4 bg-gray-200 text-gray-700 font-bold py-3 px-6 rounded-xl hover:bg-gray-300 transition-all duration-300"
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    Back to Shipping
+                  </motion.button>
+                </motion.div>
+              )}
+
+              {/* Success Message */}
+              {paymentSuccess && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.5 }}
+                  className="text-center py-8"
+                >
+                  <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Check className="w-8 h-8 text-emerald-600" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-brand-black mb-2">
+                    Payment Successful!
+                  </h2>
+                  <p className="text-gray-600 mb-4">
+                    Thank you for your order. You'll receive an email confirmation shortly.
+                  </p>
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm text-emerald-700">
+                    <p><strong>Payment ID:</strong> {paymentDetails?.id}</p>
+                    <p><strong>Amount:</strong> ${(paymentDetails?.amount / 100).toFixed(2)}</p>
+                  </div>
                 </motion.div>
               )}
             </motion.div>
@@ -559,6 +881,14 @@ function CheckoutPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function CheckoutPage() {
+  return (
+    <Elements stripe={stripePromise}>
+      <CheckoutPageContent />
+    </Elements>
   );
 }
 

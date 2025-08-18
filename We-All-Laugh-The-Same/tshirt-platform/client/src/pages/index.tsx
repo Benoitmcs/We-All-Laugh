@@ -100,17 +100,11 @@ function HomePage() {
                     textShadow: '0 2px 4px rgba(0,0,0,0.1)',
                   }}
                 >
-                  United by Laughter
+                  Fostering Respect and Tolerance
                 </motion.span>
               </motion.h1>
 
-              <motion.p
-                className="mx-auto mt-6 max-w-xl sm:text-xl/relaxed text-gray-800"
-                variants={itemVariants}
-              >
-                Spreading laughter and unity through design
-              </motion.p>
-
+             
               <motion.div
                 className="mt-10 flex flex-wrap justify-center gap-6"
                 variants={itemVariants}

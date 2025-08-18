@@ -12,25 +12,77 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 router.post('/', async (req, res) => {
-  const { skuId, quantity = 1 } = req.body;
+  const { cartItems } = req.body;
 
   // Input validation
-  if (!skuId || typeof skuId !== 'string' || skuId.trim().length === 0) {
-    return res.status(400).json({ error: 'Invalid SKU ID' });
+  if (!Array.isArray(cartItems) || cartItems.length === 0) {
+    return res.status(400).json({ error: 'Cart items are required' });
   }
 
-  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10) {
-    return res.status(400).json({ error: 'Invalid quantity (must be 1-10)' });
+  if (cartItems.length > 10) {
+    return res.status(400).json({ error: 'Too many items in cart (max 10)' });
+  }
+
+  // Validate each cart item
+  for (const item of cartItems) {
+    if (!item.size || typeof item.size !== 'string' || item.size.trim().length === 0) {
+      return res.status(400).json({ error: 'Size is required for all items' });
+    }
+    if (!item.color || typeof item.color !== 'string' || item.color.trim().length === 0) {
+      return res.status(400).json({ error: 'Color is required for all items' });
+    }
+    if (!item.design || typeof item.design !== 'string' || item.design.trim().length === 0) {
+      return res.status(400).json({ error: 'Design is required for all items' });
+    }
+    if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 10) {
+      return res.status(400).json({ error: 'Invalid quantity for item (must be 1-10)' });
+    }
   }
 
   try {
-    // Create Checkout Session
+    // Group items by unique variant and sum quantities
+    const variantMap = new Map();
+    
+    cartItems.forEach(item => {
+      const variantKey = `${item.design.trim()}-${item.size.trim()}-${item.color.trim()}`;
+      
+      if (variantMap.has(variantKey)) {
+        const existingItem = variantMap.get(variantKey);
+        existingItem.quantity += item.quantity;
+      } else {
+        variantMap.set(variantKey, {
+          design: item.design.trim(),
+          size: item.size.trim(),
+          color: item.color.trim(),
+          quantity: item.quantity,
+          variant: variantKey
+        });
+      }
+    });
+
+    // Create line items for each unique variant
+    const lineItems = Array.from(variantMap.values()).map(item => ({
+      price: 'price_1RtYO7HJ6pOTfIDVJhgL3e9Q',
+      quantity: Math.floor(item.quantity),
+    }));
+
+    // Create summary for session metadata
+    const cartSummary = Array.from(variantMap.values())
+      .map(item => `${item.variant}(x${item.quantity})`)
+      .join(', ');
+
+    const totalItems = Array.from(variantMap.values()).reduce((sum, item) => sum + item.quantity, 0);
+
+    // Create Checkout Session with multiple line items
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
-      line_items: [{
-        price: skuId.trim(),       // pre-created in Stripe Dashboard
-        quantity: Math.floor(quantity),
-      }],
+      line_items: lineItems,
+      metadata: {
+        totalItems: totalItems.toString(),
+        uniqueVariants: variantMap.size.toString(),
+        cartSummary: cartSummary,
+        orderType: variantMap.size === 1 ? 'single_variant' : 'mixed_cart'
+      },
       automatic_tax: { enabled: true },
       success_url: `${process.env.FRONTEND_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.FRONTEND_URL}/checkout`,
@@ -44,7 +96,7 @@ router.post('/', async (req, res) => {
       type: err.type,
       code: err.code,
       timestamp: new Date().toISOString(),
-      skuId: skuId?.substring(0, 20) + '...' // Log partial SKU for debugging
+      itemCount: cartItems?.length || 0
     });
     res.status(400).json({ error: 'Checkout session creation failed' });
   }
