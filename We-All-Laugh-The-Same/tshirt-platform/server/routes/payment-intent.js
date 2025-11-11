@@ -1,6 +1,7 @@
 // server/routes/payment-intent.js
 import Stripe from 'stripe';
 import express from 'express';
+import { PRODUCTS, calculateTotal } from '../config/products.js';
 const router = express.Router();
 
 if (!process.env.STRIPE_SECRET_KEY) {
@@ -8,7 +9,7 @@ if (!process.env.STRIPE_SECRET_KEY) {
 }
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-    apiVersion: '2025-04-30.preview',
+    apiVersion: '2024-12-18.acacia',
 });
 
 // Create Payment Intent for on-page checkout
@@ -20,11 +21,11 @@ router.post('/create', async (req, res) => {
     return res.status(400).json({ error: 'Cart items are required' });
   }
 
-  if (cartItems.length > 10) {
-    return res.status(400).json({ error: 'Too many items in cart (max 10)' });
+  if (cartItems.length > PRODUCTS.limits.maxCartItems) {
+    return res.status(400).json({ error: `Too many items in cart (max ${PRODUCTS.limits.maxCartItems})` });
   }
 
-  // Validate each cart item
+  // Validate each cart item has required fields
   for (const item of cartItems) {
     if (!item.size || typeof item.size !== 'string' || item.size.trim().length === 0) {
       return res.status(400).json({ error: 'Size is required for all items' });
@@ -35,12 +36,11 @@ router.post('/create', async (req, res) => {
     if (!item.design || typeof item.design !== 'string' || item.design.trim().length === 0) {
       return res.status(400).json({ error: 'Design is required for all items' });
     }
-    if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 10) {
-      return res.status(400).json({ error: 'Invalid quantity for item (must be 1-10)' });
+    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+      return res.status(400).json({ error: 'Invalid quantity for item' });
     }
-    if (!Number.isInteger(item.price) || item.price < 1) {
-      return res.status(400).json({ error: 'Invalid price for item' });
-    }
+    // NOTE: We intentionally DO NOT validate client-provided prices here
+    // The server will use its own canonical prices regardless of what the client sends
   }
 
   // Validate shipping address if provided
@@ -60,10 +60,19 @@ router.post('/create', async (req, res) => {
   }
 
   try {
-    // Calculate total amount
-    const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const shipping = 5; // Fixed shipping cost
-    const totalAmount = (subtotal + shipping) * 100; // Convert to cents
+    // Calculate total using SERVER-SIDE PRICES (ignoring client-provided prices)
+    // This prevents price manipulation attacks
+    const calculation = calculateTotal(cartItems);
+
+    if (!calculation.valid) {
+      return res.status(400).json({
+        error: 'Invalid cart items',
+        details: calculation.errors
+      });
+    }
+
+    const { subtotal, shipping, total } = calculation;
+    const totalAmount = total * 100; // Convert to cents for Stripe
 
     // Group items by unique variant for metadata
     const variantMap = new Map();

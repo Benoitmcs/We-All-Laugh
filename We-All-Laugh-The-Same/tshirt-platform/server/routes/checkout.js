@@ -1,6 +1,7 @@
 // server/routes/checkout.js
 import Stripe from 'stripe';
 import express from 'express';
+import { PRODUCTS, validateCartItem } from '../config/products.js';
 const router = express.Router();
 
 if (!process.env.STRIPE_SECRET_KEY) {
@@ -8,7 +9,7 @@ if (!process.env.STRIPE_SECRET_KEY) {
 }
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-    apiVersion: '2025-04-30.preview',
+    apiVersion: '2024-12-18.acacia',
 });
 
 router.post('/', async (req, res) => {
@@ -19,11 +20,12 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Cart items are required' });
   }
 
-  if (cartItems.length > 10) {
-    return res.status(400).json({ error: 'Too many items in cart (max 10)' });
+  if (cartItems.length > PRODUCTS.limits.maxCartItems) {
+    return res.status(400).json({ error: `Too many items in cart (max ${PRODUCTS.limits.maxCartItems})` });
   }
 
-  // Validate each cart item
+  // Validate each cart item against server-side product catalog
+  const validationErrors = [];
   for (const item of cartItems) {
     if (!item.size || typeof item.size !== 'string' || item.size.trim().length === 0) {
       return res.status(400).json({ error: 'Size is required for all items' });
@@ -34,9 +36,22 @@ router.post('/', async (req, res) => {
     if (!item.design || typeof item.design !== 'string' || item.design.trim().length === 0) {
       return res.status(400).json({ error: 'Design is required for all items' });
     }
-    if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 10) {
-      return res.status(400).json({ error: 'Invalid quantity for item (must be 1-10)' });
+    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+      return res.status(400).json({ error: 'Invalid quantity for item' });
     }
+
+    // Validate against product catalog (sizes, colors, designs)
+    const validation = validateCartItem(item);
+    if (!validation.valid) {
+      validationErrors.push(...validation.errors);
+    }
+  }
+
+  if (validationErrors.length > 0) {
+    return res.status(400).json({
+      error: 'Invalid cart items',
+      details: validationErrors
+    });
   }
 
   try {

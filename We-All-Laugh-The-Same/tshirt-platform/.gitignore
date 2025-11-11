@@ -55,3 +55,12 @@ Thumbs.db
 # secrets/
 # *.key
 # *.pem
+
+# Development environment files
+docker-compose.dev.yml
+client/Dockerfile.dev
+server/Dockerfile.dev
+server/index.dev.js
+client/.env.example
+server/.env.example
+DEV-SETUP.md

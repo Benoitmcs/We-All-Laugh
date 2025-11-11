@@ -47,10 +47,29 @@ async function startServer() {
     }));
 
     // CORS configuration
+    // Support multiple frontend URLs (with and without www, plus Hostinger subdomain)
+    const allowedOrigins = isProduction
+        ? [
+            process.env.FRONTEND_URL,
+            // Automatically support www variant
+            process.env.FRONTEND_URL.replace('://', '://www.'),
+            // Also support Hostinger subdomain
+            'https://tshirt.srv879764.hstgr.cloud'
+          ].filter(url => url) // Remove any undefined values
+        : ['http://localhost:3000'];
+
     const corsOptions = {
-        origin: isProduction 
-            ? [process.env.FRONTEND_URL] 
-            : ['http://localhost:3000'],
+        origin: (origin, callback) => {
+            // Allow requests with no origin (like mobile apps or curl)
+            if (!origin) return callback(null, true);
+
+            if (allowedOrigins.includes(origin)) {
+                callback(null, true);
+            } else {
+                console.warn(`CORS blocked origin: ${origin}`);
+                callback(new Error('Not allowed by CORS'));
+            }
+        },
         credentials: true,
         optionsSuccessStatus: 200
     };
